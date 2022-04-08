@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using TTTWeb.Services;
+using TTTService;
 
 namespace TTTWeb.Hubs;
 
@@ -12,6 +13,7 @@ public interface IClientHub
     Task RoomDeleted(string id);
     Task GameStarted(string id);
     Task GameEnded(string id);
+    Task MadeMove(int x, int y, GoBangTurnType move, GoBangTurnType result);
 }
 
 public class TheHub : Hub<IClientHub>
@@ -99,11 +101,29 @@ public class TheHub : Hub<IClientHub>
         await Clients.All.GameEnded(id);
     }
 
-    public override async Task OnDisconnectedAsync(Exception? exception)
+    public override Task OnDisconnectedAsync(Exception? exception)
     {
-        if (!CheckRoom(out string id)) return;
-        if (_roomService.EndGame(id, Context.ConnectionId)) await Clients.All.GameEnded(id);
-        if (_roomService.LeaveRoom(id, Context.ConnectionId)) await Clients.All.LeftRoom(new(id));
-        if (_roomService.DeleteRoom(id, Context.ConnectionId)) await Clients.All.RoomDeleted(new(id));
+        if (CheckRoom(out string id))
+        {
+            _roomService.EndGame(id, Context.ConnectionId);
+            _roomService.LeaveRoom(id, Context.ConnectionId);
+            _roomService.DeleteRoom(id, Context.ConnectionId);
+        }
+        return Task.CompletedTask;
+    }
+
+    public IEnumerable<IEnumerable<GoBangTurnType>>? GetBoard()
+    {
+        if (!CheckRoom(out string id)) return null;
+        _roomService.GetBoard(id, out var board);
+        return board;
+    }
+
+    public async Task<bool> MakeMove(int x, int y)
+    {
+        if (!CheckRoom(out string id)) return false;
+        if (_roomService.MakeMove(id, Context.ConnectionId, x, y, out var turn) is not GoBangTurnType result) return false;
+        await Clients.Group(id).MadeMove(x, y, turn, result);
+        return true;
     }
 }

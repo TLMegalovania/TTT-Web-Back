@@ -1,4 +1,5 @@
 using TTTService;
+using System.Diagnostics.CodeAnalysis;
 
 namespace TTTWeb.Services;
 
@@ -17,21 +18,13 @@ public class RoomService
     public GoBangService? this[string id] =>
         rooms.TryGetValue(id, out var room) ? room.Game.Value : null;
 
-    // public Player GetPlayer(string id, string player)
-    // {
-    //     if (!rooms.TryGetValue(id, out var room)) return Player.None;
-    //     if (room.Owner == player) return Player.Owner;
-    //     if (room.Guest == player) return Player.Guest;
-    //     return Player.None;
-    // }
-
     public bool JoinRoom(string id, string guest, string guestName)
     {
-        if (!rooms.TryGetValue(id, out var room) || room.GameStarted) return false;
-        lock (room)
+        if (!rooms.TryGetValue(id, out var room)) return false;
+        if (room.GameStarted || room.Guest is not null)
         {
-            if (room.IsFull) return false;
-            room.Count++;
+            room.Audiences.Add(new(guest, guestName));
+            return false;
         }
         room.Guest = guest;
         room.GuestName = guestName;
@@ -43,10 +36,14 @@ public class RoomService
 
     public bool LeaveRoom(string id, string guest)
     {
-        if (!rooms.TryGetValue(id, out var room) || room.Guest != guest) return false;
+        if (!rooms.TryGetValue(id, out var room)) return false;
+        if (room.Guest != guest)
+        {
+            room.Audiences.RemoveAll(a => a.Player == guest);
+            return false;
+        }
         room.Guest = null;
         room.GuestName = null;
-        room.Count--;
         return true;
     }
 
@@ -59,7 +56,7 @@ public class RoomService
 
     public bool StartGame(string id, string owner)
     {
-        if (!rooms.TryGetValue(id, out var room) || room.Owner != owner || !room.IsFull) return false;
+        if (!rooms.TryGetValue(id, out var room) || room.Owner != owner || room.Guest is null) return false;
         room.GameStarted = true;
         return true;
     }
@@ -70,5 +67,44 @@ public class RoomService
         room.GameStarted = false;
         room.Game = new(() => new(5, 5));
         return true;
+    }
+
+    public bool GetBoard(string id, [NotNullWhen(true)] out IEnumerable<IEnumerable<GoBangTurnType>>? board)
+    {
+        if (!rooms.TryGetValue(id, out var room) || !room.GameStarted)
+        {
+            board = null;
+            return false;
+        }
+        board = room.Game.Value.GetBoard();
+        return true;
+    }
+
+    public GoBangTurnType? MakeMove(string id, string player, int x, int y, out GoBangTurnType turn)
+    {
+        if (!rooms.TryGetValue(id, out var room) || !room.GameStarted)
+        {
+            turn = GoBangTurnType.Null;
+            return null;
+        }
+        var service = room.Game.Value;
+        bool isCurrent;
+        switch (service.NextTurnType)
+        {
+            case GoBangTurnType.Black:
+                isCurrent = player == room.Owner;
+                turn = GoBangTurnType.Black;
+                break;
+            case GoBangTurnType.White:
+                isCurrent = player == room.Guest;
+                turn = GoBangTurnType.White;
+                break;
+            default:
+                isCurrent = false;
+                turn = GoBangTurnType.Null;
+                break;
+        };
+        if (!isCurrent) return null;
+        return room.Game.Value.Judge(x, y);
     }
 }

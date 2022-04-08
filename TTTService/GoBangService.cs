@@ -44,13 +44,11 @@ public class GoBangService
     /// <param name="y"></param>
     /// <param name="board"></param>
     /// <returns>Winning side.</returns>
-    /// <exception cref="InvalidOperationException"></exception>
-    /// <exception cref="CheatException"></exception>
-    public GoBangTurnType Judge(int x, int y)
+    public GoBangTurnType? Judge(int x, int y)
     {
         x += 2;
         y += 2;
-        if (!board.Move(x, y)) throw new CheatException();
+        if (!board.Move(x, y)) return null;
         var turn = board[x, y];
         int lines = 0;
         for (int direction = 0; direction < 4; direction++)
@@ -93,5 +91,8 @@ public class GoBangService
         return turn;
     }
 
+    public IEnumerable<IEnumerable<GoBangTurnType>> GetBoard() => board.GetBoard();
+
+    public GoBangTurnType NextTurnType => board.NextTurnType;
 }
 
