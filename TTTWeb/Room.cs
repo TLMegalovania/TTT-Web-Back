@@ -8,21 +8,28 @@ public class Room
     public string OwnerName { get; }
     public string? Guest { get; set; }
     public string? GuestName { get; set; }
-    public Lazy<GoBangService> Game { get; set; }
-    public bool GameStarted { get; set; }
-    public List<PlayerInfo> Audiences { get; }
+
+    public IEnumerable<(string, string?)> StringProperties
+    {
+        get
+        {
+            yield return (nameof(Owner), Owner);
+            yield return (nameof(OwnerName), OwnerName);
+            yield return (nameof(Guest), Guest);
+            yield return (nameof(GuestName), GuestName);
+        }
+    }
 
     public Room(string owner, string ownerName)
     {
         Owner = owner;
         OwnerName = ownerName;
-        Game = new(() => new(5, 5));
-        Audiences = new();
     }
 }
 
-public record RoomInfo(string ID, string Name);
-public record PlayerInfo(string Player, string PlayerName);
+public record RoomInfo(string ID, string OwnerName, string? GuestName, bool GameStarted);
+public record MoveInfo(byte x, byte y, GoBangTurnType Trun, GoBangTurnType Result);
+//public record PlayerInfo(string Player, string PlayerName);
 
 // public enum Player
 // {

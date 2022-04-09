@@ -1,110 +1,156 @@
 using TTTService;
-using System.Diagnostics.CodeAnalysis;
+using StackExchange.Redis;
 
 namespace TTTWeb.Services;
 
 public class RoomService
 {
-    private Dictionary<string, Room> rooms = new();
+    private IConnectionMultiplexer _redis;
 
-    public string CreateRoom(string owner, string ownerName)
+    public RoomService(IConnectionMultiplexer redis)
+    {
+        _redis = redis;
+    }
+
+    private const string RoomPrefix = "room:";
+    private const string AudiencesPrefix = "audiences:";
+
+    public async Task<GoBangBoard?> GetGame(string id)
+    {
+        id = RoomPrefix + id;
+        var db = _redis.GetDatabase();
+        var game = await db.HashGetAsync(id, "Game");
+        if (game.IsNull) return null;
+        return GoBangBoard.Deserialize(game);
+    }
+
+    public async Task<string> CreateRoom(string owner, string ownerName)
     {
         Room room = new(owner, ownerName);
-        string id = Guid.NewGuid().ToString();
-        rooms.Add(id, room);
+        string id = RoomPrefix + Guid.NewGuid().ToString();
+        var rooms = _redis.GetDatabase();
+        foreach (var (key, value) in room.StringProperties)
+        {
+            if (value is not null) await rooms.HashSetAsync(id, key, value);
+        }
         return id;
     }
 
-    public GoBangService? this[string id] =>
-        rooms.TryGetValue(id, out var room) ? room.Game.Value : null;
 
-    public bool JoinRoom(string id, string guest, string guestName)
+    public Task<bool> JoinRoom(string id, string guest, string guestName)
     {
-        if (!rooms.TryGetValue(id, out var room)) return false;
-        if (room.GameStarted || room.Guest is not null)
+        var rooms = _redis.GetDatabase();
+        var tran = rooms.CreateTransaction();
+        tran.AddCondition(Condition.KeyExists(id));
+        tran.AddCondition(Condition.HashNotExists(id, "Guest"));
+        _ = tran.HashSetAsync(id, "Guest", guest);
+        _ = tran.HashSetAsync(id, "GuestName", guestName);
+        return tran.ExecuteAsync();
+    }
+
+    public async IAsyncEnumerable<RoomInfo> GetRooms()
+    {
+        var endpoints = _redis.GetEndPoints();
+        var rooms = _redis.GetDatabase();
+        foreach (var endpoint in endpoints)
         {
-            room.Audiences.Add(new(guest, guestName));
-            return false;
+            var server = _redis.GetServer(endpoint);
+            var keys = server.KeysAsync(pattern: RoomPrefix + "*");
+            await foreach (var key in keys)
+            {
+                var ownerName = await rooms.HashGetAsync(key, "OwnerName");
+                var guestName = await rooms.HashGetAsync(key, "GuestName");
+                var gameStarted = await rooms.HashExistsAsync(key, "Game");
+                yield return new(key, ownerName, guestName.IsNull ? null : (string)guestName, gameStarted);
+            }
         }
-        room.Guest = guest;
-        room.GuestName = guestName;
-        return true;
     }
 
-    public IEnumerable<RoomInfo> GetRooms() =>
-        rooms.Select(r => new RoomInfo(r.Key, r.Value.OwnerName));
-
-    public bool LeaveRoom(string id, string guest)
+    public Task<bool> LeaveRoom(string id, string guest)
     {
-        if (!rooms.TryGetValue(id, out var room)) return false;
-        if (room.Guest != guest)
+        var rooms = _redis.GetDatabase();
+        var tran = rooms.CreateTransaction();
+        tran.AddCondition(Condition.HashEqual(id, "Guest", guest));
+        tran.HashDeleteAsync(id, "Guest");
+        //tran.HashDeleteAsync(id, "GuestName");
+        return tran.ExecuteAsync();
+    }
+
+    public Task<bool> DeleteRoom(string id, string owner)
+    {
+        var rooms = _redis.GetDatabase();
+        var tran = rooms.CreateTransaction();
+        tran.AddCondition(Condition.HashEqual(id, "Owner", owner));
+        tran.KeyDeleteAsync(id);
+        return tran.ExecuteAsync();
+    }
+
+    public Task<bool> StartGame(string id, string owner, byte rows, byte columns)
+    {
+        var rooms = _redis.GetDatabase();
+        var tran = rooms.CreateTransaction();
+        tran.AddCondition(Condition.HashEqual(id, "Owner", owner));
+        tran.HashSetAsync(id, "Game", new GoBangBoard(rows, columns).Serialize());
+        return tran.ExecuteAsync();
+    }
+
+    public async Task<bool> EndGame(string id, string player)
+    {
+        var rooms = _redis.GetDatabase();
+        var tran1 = rooms.CreateTransaction();
+        tran1.AddCondition(Condition.HashEqual(id, "Owner", player));
+        _ = tran1.HashDeleteAsync(id, "Game");
+        var tran2 = rooms.CreateTransaction();
+        tran2.AddCondition(Condition.HashEqual(id, "Guest", player));
+        _ = tran2.HashDeleteAsync(id, "Game");
+        return await tran1.ExecuteAsync() || await tran2.ExecuteAsync();
+    }
+
+    public async IAsyncEnumerable<IEnumerable<GoBangTurnType>> GetBoard(string id)
+    {
+        var rooms = _redis.GetDatabase();
+        var game = await rooms.HashGetAsync(id, "Game");
+        if (game.IsNull)
         {
-            room.Audiences.RemoveAll(a => a.Player == guest);
-            return false;
+            yield break;
         }
-        room.Guest = null;
-        room.GuestName = null;
-        return true;
-    }
-
-    public bool DeleteRoom(string id, string owner)
-    {
-        if (!rooms.TryGetValue(id, out var room) || room.Owner != owner) return false;
-        rooms.Remove(id);
-        return true;
-    }
-
-    public bool StartGame(string id, string owner)
-    {
-        if (!rooms.TryGetValue(id, out var room) || room.Owner != owner || room.Guest is null) return false;
-        room.GameStarted = true;
-        return true;
-    }
-
-    public bool EndGame(string id, string player)
-    {
-        if (!(rooms.TryGetValue(id, out var room) && (room.Owner == player || room.Guest == player))) return false;
-        room.GameStarted = false;
-        room.Game = new(() => new(5, 5));
-        return true;
-    }
-
-    public bool GetBoard(string id, [NotNullWhen(true)] out IEnumerable<IEnumerable<GoBangTurnType>>? board)
-    {
-        if (!rooms.TryGetValue(id, out var room) || !room.GameStarted)
+        var board = GoBangBoard.Deserialize(game).GetBoard();
+        foreach (var row in board)
         {
-            board = null;
-            return false;
+            yield return row;
         }
-        board = room.Game.Value.GetBoard();
-        return true;
     }
 
-    public GoBangTurnType? MakeMove(string id, string player, int x, int y, out GoBangTurnType turn)
+    public async Task<MoveInfo?> MakeMove(string id, string player, bool isOwner, byte x, byte y)
     {
-        if (!rooms.TryGetValue(id, out var room) || !room.GameStarted)
+        var rooms = _redis.GetDatabase();
+        var game = await rooms.HashGetAsync(id, "Game");
+        if (game.IsNull)
         {
-            turn = GoBangTurnType.Null;
             return null;
         }
-        var service = room.Game.Value;
-        bool isCurrent;
-        switch (service.NextTurnType)
+        string expectedPlayer;
+        GoBangTurnType turn;
+        if (isOwner)
         {
-            case GoBangTurnType.Black:
-                isCurrent = player == room.Owner;
-                turn = GoBangTurnType.Black;
-                break;
-            case GoBangTurnType.White:
-                isCurrent = player == room.Guest;
-                turn = GoBangTurnType.White;
-                break;
-            default:
-                isCurrent = false;
-                turn = GoBangTurnType.Null;
-                break;
-        };
-        if (!isCurrent) return null;
-        return room.Game.Value.Judge(x, y);
+            expectedPlayer = await rooms.HashGetAsync(id, "Owner");
+            turn = GoBangTurnType.Black;
+        }
+        else
+        {
+            expectedPlayer = await rooms.HashGetAsync(id, "Guest");
+            turn = GoBangTurnType.White;
+        }
+        if (expectedPlayer != player)
+        {
+            return null;
+        }
+        var service = GoBangBoard.Deserialize(game);
+        if (service.NextTurnType != turn)
+        {
+            return null;
+        }
+        if (service.Judge(x, y) is not GoBangTurnType result) return null;
+        return new(x, y, turn, result);
     }
 }
