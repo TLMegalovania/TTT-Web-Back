@@ -138,6 +138,8 @@ public class TheHub : Hub<IClientHub>
         if (!CheckOwner(out bool isOwner)) return false;
         if (await _roomService.MakeMove(id, Context.ConnectionId, isOwner, x, y) is not MoveInfo move) return false;
         await Clients.Group(id).MadeMove(move);
+        if (move.Result != GoBangTurnType.Null)
+            await Clients.All.GameEnded(id);
         return true;
     }
 }
