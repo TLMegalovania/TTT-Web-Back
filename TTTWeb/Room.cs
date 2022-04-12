@@ -28,7 +28,7 @@ public class Room
 }
 
 public record RoomInfo(string ID, string OwnerName, string? GuestName, bool GameStarted);
-public record MoveInfo(byte x, byte y, GoBangTurnType Trun, GoBangTurnType Result);
+public record MoveInfo(byte x, byte y, GoBangTurnType Turn, GoBangTurnType Result);
 //public record PlayerInfo(string Player, string PlayerName);
 
 // public enum Player

@@ -1,6 +1,6 @@
 FROM bitnami/dotnet-sdk:6 AS builder
 WORKDIR /src
-COPY . /src/
+COPY . ./
 RUN dotnet restore ./TTTWeb/TTTWeb.csproj
 RUN dotnet build ./TTTWeb/TTTWeb.csproj --no-restore
 RUN dotnet publish ./TTTWeb/TTTWeb.csproj --no-restore -o /bin/ -c Release

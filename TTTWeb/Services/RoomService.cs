@@ -72,7 +72,7 @@ public class RoomService
         var tran = rooms.CreateTransaction();
         tran.AddCondition(Condition.HashEqual(id, "Guest", guest));
         tran.HashDeleteAsync(id, "Guest");
-        //tran.HashDeleteAsync(id, "GuestName");
+        tran.HashDeleteAsync(id, "GuestName");
         return tran.ExecuteAsync();
     }
 
@@ -90,6 +90,8 @@ public class RoomService
         var rooms = _redis.GetDatabase();
         var tran = rooms.CreateTransaction();
         tran.AddCondition(Condition.HashEqual(id, "Owner", owner));
+        tran.AddCondition(Condition.HashExists(id, "Guest"));
+        tran.AddCondition(Condition.HashNotExists(id, "Game"));
         tran.HashSetAsync(id, "Game", new GoBangBoard(rows, columns).Serialize());
         return tran.ExecuteAsync();
     }
@@ -99,9 +101,11 @@ public class RoomService
         var rooms = _redis.GetDatabase();
         var tran1 = rooms.CreateTransaction();
         tran1.AddCondition(Condition.HashEqual(id, "Owner", player));
+        tran1.AddCondition(Condition.HashExists(id, "Game"));
         _ = tran1.HashDeleteAsync(id, "Game");
         var tran2 = rooms.CreateTransaction();
         tran2.AddCondition(Condition.HashEqual(id, "Guest", player));
+        tran2.AddCondition(Condition.HashExists(id, "Game"));
         _ = tran2.HashDeleteAsync(id, "Game");
         return await tran1.ExecuteAsync() || await tran2.ExecuteAsync();
     }
@@ -151,6 +155,7 @@ public class RoomService
             return null;
         }
         if (service.Judge(x, y) is not GoBangTurnType result) return null;
+        await rooms.HashSetAsync(id, "Game", service.Serialize());
         return new(x, y, turn, result);
     }
 }

@@ -18,7 +18,12 @@ public interface IClientHub
 public class TheHub : Hub<IClientHub>
 {
     private readonly RoomService _roomService;
-    public TheHub(RoomService roomService) => _roomService = roomService;
+    private readonly ILogger<TheHub> _logger;
+    public TheHub(RoomService roomService, ILogger<TheHub> logger)
+    {
+        _roomService = roomService;
+        _logger = logger;
+    }
 
     private bool CheckAuth(out string username)
     {
@@ -61,22 +66,25 @@ public class TheHub : Hub<IClientHub>
 
     public IAsyncEnumerable<RoomInfo> GetRooms() => _roomService.GetRooms();
 
-    public async Task<bool> CreateRoom()
+    public async Task<string?> CreateRoom()
     {
-        if (!CheckAuth(out string ownerName)) return false;
-        if (CheckRoom(out _)) return false;
+        if (!CheckAuth(out string ownerName)) return null;
+        if (CheckRoom(out _)) return null;
         string id = await _roomService.CreateRoom(Context.ConnectionId, ownerName);
         Context.Items["roomId"] = id;
         Context.Items["isOwner"] = true;
         await Groups.AddToGroupAsync(Context.ConnectionId, id);
         await Clients.All.RoomCreated(id, ownerName);
-        return true;
+        _logger.LogInformation($"{ownerName} created room {id}");
+        return id;
     }
 
     public async Task<bool> JoinRoom(string id)
     {
         if (!CheckAuth(out string guestName)) return false;
         if (CheckRoom(out _)) return false;
+        _logger.LogInformation($"{guestName} joined room {id}");
+        await Groups.AddToGroupAsync(Context.ConnectionId, id);
         if (await _roomService.JoinRoom(id, Context.ConnectionId, guestName))
         {
             Context.Items["roomId"] = id;
@@ -84,7 +92,6 @@ public class TheHub : Hub<IClientHub>
             await Clients.All.JoinedRoom(id, guestName);
             return true;
         }
-        await Groups.AddToGroupAsync(Context.ConnectionId, id);
         return false;
     }
 
@@ -94,6 +101,9 @@ public class TheHub : Hub<IClientHub>
         if (await _roomService.LeaveRoom(id, Context.ConnectionId))
             await Clients.All.LeftRoom(new(id));
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, id);
+        Context.Items.Remove("roomId");
+        Context.Items.Remove("isOwner");
+        _logger.LogInformation($"{Context.Items["username"]} left room {id}");
     }
 
     public async Task DeleteRoom()
@@ -102,24 +112,30 @@ public class TheHub : Hub<IClientHub>
         if (await _roomService.DeleteRoom(id, Context.ConnectionId))
             await Clients.All.RoomDeleted(new(id));
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, id);
+        Context.Items.Remove("roomId");
+        Context.Items.Remove("isOwner");
+        _logger.LogInformation($"{Context.Items["username"]} deleted room {id}");
     }
 
-    public async Task StartGame(byte rows, byte cols)
+    public async Task StartGame(int rows, int cols)
     {
         if (!CheckRoom(out string id)) return;
-        if (!await _roomService.StartGame(id, Context.ConnectionId, rows, cols)) return;
+        _logger.LogInformation($"{Context.Items["username"]} trying to start game in room {id}");
+        if (!await _roomService.StartGame(id, Context.ConnectionId, (byte)rows, (byte)cols)) return;
         await Clients.All.GameStarted(id);
     }
 
     public async Task EndGame()
     {
         if (!CheckRoom(out string id)) return;
+        _logger.LogInformation($"{Context.Items["username"]} trying to end game in room {id}");
         if (!await _roomService.EndGame(id, Context.ConnectionId)) return;
         await Clients.All.GameEnded(id);
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        _logger.LogInformation($"{Context.Items["username"]} disconnected");
         if (!CheckRoom(out string id)) return;
         await _roomService.EndGame(id, Context.ConnectionId);
         await _roomService.LeaveRoom(id, Context.ConnectionId);
@@ -129,17 +145,20 @@ public class TheHub : Hub<IClientHub>
     public async IAsyncEnumerable<IEnumerable<GoBangTurnType>> GetBoard()
     {
         if (!CheckRoom(out string id)) yield break;
+        _logger.LogInformation($"{Context.Items["username"]} requested board in room {id}");
         await foreach (var row in _roomService.GetBoard(id)) yield return row;
     }
 
-    public async Task<bool> MakeMove(byte x, byte y)
+    public async Task<bool> MakeMove(int x, int y)
     {
         if (!CheckRoom(out string id)) return false;
+        _logger.LogInformation($"{Context.Items["username"]} trying to make move ({x}, {y}) in room {id}");
         if (!CheckOwner(out bool isOwner)) return false;
-        if (await _roomService.MakeMove(id, Context.ConnectionId, isOwner, x, y) is not MoveInfo move) return false;
+        if (await _roomService.MakeMove(id, Context.ConnectionId, isOwner, (byte)x, (byte)y) is not MoveInfo move) return false;
         await Clients.Group(id).MadeMove(move);
         if (move.Result != GoBangTurnType.Null)
-            await Clients.All.GameEnded(id);
+            await EndGame();
+        _logger.LogInformation($"{Context.Items["username"]} made move ({x}, {y}) in room {id}");
         return true;
     }
 }

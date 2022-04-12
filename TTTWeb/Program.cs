@@ -11,6 +11,6 @@ services
 
 var app = builder.Build();
 
-app.MapHub<TheHub>("/api");
+app.MapHub<TheHub>("/api/hub");
 
 app.Run();
