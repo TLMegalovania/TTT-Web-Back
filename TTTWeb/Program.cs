@@ -7,7 +7,10 @@ var services = builder.Services;
 services.AddSignalR();
 services
     .AddSingleton<RoomService>()
-    .AddSingleton<IConnectionMultiplexer, ConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect("redis"));
+    .AddSingleton<IConnectionMultiplexer, ConnectionMultiplexer>(provider =>
+    {
+        return ConnectionMultiplexer.Connect(provider.GetRequiredService<IConfiguration>().GetConnectionString("Redis"));
+    });
 
 var app = builder.Build();
 
