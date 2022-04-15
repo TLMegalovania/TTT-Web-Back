@@ -13,16 +13,6 @@ public class RoomService
     }
 
     private const string RoomPrefix = "room:";
-    private const string AudiencesPrefix = "audiences:";
-
-    public async Task<GoBangBoard?> GetGame(string id)
-    {
-        id = RoomPrefix + id;
-        var db = _redis.GetDatabase();
-        var game = await db.HashGetAsync(id, "Game");
-        if (game.IsNull) return null;
-        return GoBangBoard.Deserialize(game);
-    }
 
     public async Task<string> CreateRoom(string owner, string ownerName)
     {

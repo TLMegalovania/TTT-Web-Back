@@ -9,4 +9,4 @@ FROM bitnami/aspnet-core:6.0
 WORKDIR /app
 COPY --from=builder /bin/ ./
 ENTRYPOINT [ "dotnet", "TTTWeb.dll" ]
-EXPOSE 80 443
+EXPOSE 80
