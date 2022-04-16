@@ -98,6 +98,7 @@ public class TheHub : Hub<IClientHub>
     public async Task LeaveRoom()
     {
         if (!CheckRoom(out string id)) return;
+        await EndGame();
         if (await _roomService.LeaveRoom(id, Context.ConnectionId))
             await Clients.All.LeftRoom(new(id));
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, id);
@@ -109,6 +110,7 @@ public class TheHub : Hub<IClientHub>
     public async Task DeleteRoom()
     {
         if (!CheckRoom(out string id)) return;
+        await EndGame();
         if (await _roomService.DeleteRoom(id, Context.ConnectionId))
             await Clients.All.RoomDeleted(new(id));
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, id);
